@@ -1,23 +1,320 @@
-export default async function handler(req, res) {
-  // CORS 허용
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
-  if (req.method === "OPTIONS") return res.status(200).end();
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>IRP 안전자산 ETF AUM TOP 15</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif; background: #f4f7fb; }
 
-  const { basDd } = req.query;
-  if (!basDd) return res.status(400).json({ error: "basDd 파라미터 필요" });
+  .header {
+    background: linear-gradient(135deg, #003580 0%, #0066CC 100%);
+    padding: 20px 24px 14px; color: #fff;
+  }
+  .header-sub { font-size: 11px; color: #A8C8F0; letter-spacing: 1px; margin-bottom: 4px; }
+  .header-title { font-size: 18px; font-weight: 700; }
+  .header-desc { font-size: 12px; color: #C8E0F8; margin-top: 3px; }
 
-  const API_KEY = process.env.KRX_API_KEY;
-  const url = `http://data-dbg.krx.co.kr/svc/apis/etp/etf_bydd_trd?basDd=${basDd}`;
+  .tabs { display: flex; margin-top: 14px; gap: 2px; }
+  .tab {
+    padding: 8px 20px; font-size: 13px; font-weight: 700;
+    border: none; cursor: pointer; background: rgba(255,255,255,0.15);
+    color: #fff; border-bottom: 3px solid transparent; transition: all 0.15s;
+  }
+  .tab.active { background: #fff; color: #003580; border-bottom: 3px solid #E8521A; }
+
+  .notice {
+    background: #EEF5FF; border-bottom: 1px solid #C8D8EE;
+    padding: 7px 16px; font-size: 11px; color: #5580B0;
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .notice.mixed { background: #FFF8EE; border-bottom-color: #F0D8B0; color: #8A6020; }
+
+  .controls {
+    padding: 10px 16px; background: #fff;
+    border-bottom: 1px solid #C8D8EE;
+    display: flex; align-items: center; gap: 10px;
+  }
+  .btn-refresh {
+    background: #0066CC; color: #fff; border: none;
+    border-radius: 6px; padding: 7px 16px;
+    font-size: 12px; font-weight: 700; cursor: pointer;
+  }
+  .btn-refresh:disabled { background: #7AAAD8; cursor: not-allowed; }
+  .last-updated { font-size: 11px; color: #A0A8B8; }
+  .summary-box {
+    display: inline-flex; gap: 16px; background: #F0F4FA;
+    border-radius: 6px; padding: 5px 14px; margin-left: auto;
+  }
+  .summary-item { text-align: center; }
+  .summary-label { font-size: 10px; color: #778; }
+  .summary-val { font-size: 13px; font-weight: 700; color: #003580; }
+
+  .error-bar {
+    background: #FFF0F0; border-left: 4px solid #CC3333;
+    padding: 8px 16px; font-size: 12px; color: #CC3333;
+  }
+
+  .table-wrap { padding: 10px 14px 6px; overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  thead tr { background: #F0F4FA; border-bottom: 2px solid #0066CC; }
+  th { padding: 9px 6px; color: #003580; font-weight: 700; white-space: nowrap; }
+  tbody tr:nth-child(odd) { background: #fff; }
+  tbody tr:nth-child(even) { background: #F7FAFF; }
+  tbody tr { border-bottom: 1px solid #C8D8EE; }
+  td { padding: 8px 6px; }
+
+  .rank-badge {
+    display: inline-block; width: 22px; height: 22px;
+    border-radius: 50%; font-size: 11px; font-weight: 700;
+    line-height: 22px; text-align: center;
+  }
+  .rank-1 { background: #E8521A; color: #fff; }
+  .rank-2, .rank-3 { background: #0066CC; color: #fff; }
+  .rank-n { background: #DDE8F5; color: #003580; }
+
+  .bar-wrap { display: flex; align-items: center; gap: 5px; }
+  .bar { height: 7px; border-radius: 4px; }
+  .bar-1 { background: linear-gradient(90deg, #E8521A, #FF8855); }
+  .bar-n { background: linear-gradient(90deg, #0066CC, #4AA8FF); }
+  .bar-pct { font-size: 10px; color: #889; }
+
+  .footer { padding: 8px 16px 20px; font-size: 10px; color: #AAB; line-height: 1.7; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="header-sub">SAMSUNG SECURITIES</div>
+  <div class="header-title">IRP 안전자산 ETF AUM TOP 15</div>
+  <div class="header-desc" id="baseDate">기준일 조회 중...</div>
+  <div class="tabs">
+    <button class="tab active" onclick="switchTab('mixed')">채권혼합형</button>
+    <button class="tab" onclick="switchTab('bond')">채권형</button>
+  </div>
+</div>
+
+<div class="notice mixed" id="noticeBar">
+  ※ 주식50% 미만 + 채권50% 이상 → 안전자산 편입 / 주식 노출 최대 85% 가능
+</div>
+
+<div class="controls">
+  <button class="btn-refresh" id="btnRefresh" onclick="loadData()">🔄 최신 데이터 조회</button>
+  <span class="last-updated" id="lastUpdated"></span>
+  <div class="summary-box" id="summaryBox" style="display:none">
+    <div class="summary-item">
+      <div class="summary-label">조회 종목</div>
+      <div class="summary-val" id="sumCount">-</div>
+    </div>
+    <div class="summary-item">
+      <div class="summary-label">1위</div>
+      <div class="summary-val" id="sumTop" style="font-size:11px; max-width:160px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap">-</div>
+    </div>
+  </div>
+</div>
+
+<div id="errorBar" class="error-bar" style="display:none"></div>
+
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr>
+        <th style="width:36px;text-align:center">순위</th>
+        <th style="text-align:left">ETF명</th>
+        <th style="width:100px;text-align:center">운용사</th>
+        <th style="width:95px;text-align:right">AUM</th>
+        <th style="width:130px;text-align:left">비율</th>
+      </tr>
+    </thead>
+    <tbody id="tableBody">
+      <tr><td colspan="5" style="text-align:center;padding:30px;color:#AAB">
+        조회 버튼을 눌러주세요
+      </td></tr>
+    </tbody>
+  </table>
+</div>
+
+<div class="footer">
+  * 출처: 한국거래소(KRX) 공식 데이터 / AUM 단위: 억원 (1조 이상은 조 단위 표시)<br/>
+  * 본 자료는 내부 참고용이며 투자권유 목적이 아닙니다.
+</div>
+
+<script>
+// ── 종목 분류 정의 ──────────────────────────────────────────
+const MIXED_KEYWORDS = [
+  "채권혼합", "혼합50", "혼합44", "TDF", "글로벌자산배분"
+];
+const BOND_KEYWORDS = [
+  "국고채", "통안채", "단기채권", "중기채권", "우량채권",
+  "국채", "회사채", "크레딧", "단기통안"
+];
+// 주식형·해외주식형 제외 키워드
+const EXCLUDE_KEYWORDS = [
+  "레버리지", "인버스", "선물", "원유", "금", "달러", "엔", "유로",
+  "나스닥", "S&P", "미국", "중국", "일본", "베트남", "인도",
+  "코스닥", "코스피200롱", "바이오", "헬스케어", "게임",
+  "2차전지", "반도체", "AI", "로봇", "방산"
+];
+
+let currentTab = "mixed";
+let allData = [];
+
+function switchTab(tab) {
+  currentTab = tab;
+  document.querySelectorAll(".tab").forEach((el, i) => {
+    el.classList.toggle("active", (i === 0 && tab === "mixed") || (i === 1 && tab === "bond"));
+  });
+  const notice = document.getElementById("noticeBar");
+  if (tab === "mixed") {
+    notice.className = "notice mixed";
+    notice.textContent = "※ 주식50% 미만 + 채권50% 이상 → 안전자산 편입 / 주식 노출 최대 85% 가능";
+  } else {
+    notice.className = "notice";
+    notice.textContent = "※ 주식 0%, 순수 채권형 → IRP/DC 안전자산 편입 가능";
+  }
+  if (allData.length) renderTable(allData);
+}
+
+function isMixed(name) {
+  return MIXED_KEYWORDS.some(k => name.includes(k));
+}
+function isBond(name) {
+  if (EXCLUDE_KEYWORDS.some(k => name.includes(k))) return false;
+  return BOND_KEYWORDS.some(k => name.includes(k));
+}
+function isExcluded(name) {
+  return EXCLUDE_KEYWORDS.some(k => name.includes(k));
+}
+
+function prevBizDay() {
+  const d = new Date();
+  do { d.setDate(d.getDate() - 1); } while ([0, 6].includes(d.getDay()));
+  return d.toISOString().slice(0, 10).replace(/-/g, "");
+}
+
+function fmtAum(v) {
+  if (!v) return "—";
+  if (v >= 10000) return `<span style="color:#E8521A;font-weight:700">${(v/10000).toFixed(1)}</span><span style="font-size:10px;color:#889">조</span>`;
+  return `${v.toLocaleString()}<span style="font-size:10px;color:#889">억</span>`;
+}
+
+function fmtDate(s) {
+  if (!s || s.length !== 8) return s;
+  return `${s.slice(0,4)}.${s.slice(4,6)}.${s.slice(6,8)}`;
+}
+
+async function loadData() {
+  const btn = document.getElementById("btnRefresh");
+  const errBar = document.getElementById("errorBar");
+  btn.disabled = true;
+  btn.textContent = "⏳ 조회 중...";
+  errBar.style.display = "none";
+
+  const basDd = prevBizDay();
 
   try {
-    const response = await fetch(url, {
-      headers: { AUTH_KEY: API_KEY }
-    });
-    if (!response.ok) throw new Error(`KRX 응답 오류: ${response.status}`);
-    const data = await response.json();
-    res.status(200).json(data);
-  } catch (e) {
-    res.status(500).json({ error: e.message });
+    const res = await fetch(`/api/krx?basDd=${basDd}`);
+    if (!res.ok) throw new Error(`서버 오류 ${res.status}`);
+    const json = await res.json();
+
+    const rows = json?.OutBlock_1 ?? json?.output ?? json?.result ?? [];
+    if (!rows.length) throw new Error("데이터 없음 — 장 개장일인지 확인해주세요");
+
+    allData = rows;
+
+    // 기준일 표시
+    const dateStr = rows[0]?.BAS_DD ?? basDd;
+    document.getElementById("baseDate").textContent = `기준일: ${fmtDate(dateStr)} (전 영업일)`;
+    document.getElementById("lastUpdated").textContent = `최종 조회: ${new Date().toLocaleString("ko-KR")}`;
+
+    renderTable(rows);
+
+  } catch(e) {
+    errBar.style.display = "block";
+    errBar.textContent = "⚠️ " + e.message;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "🔄 최신 데이터 조회";
   }
 }
+
+function renderTable(rows) {
+  // 탭에 맞게 필터
+  let filtered = rows.filter(r => {
+    const nm = r.ISU_NM ?? r.isuNm ?? "";
+    return currentTab === "mixed" ? isMixed(nm) : isBond(nm);
+  });
+
+  // AUM 파싱 — 필드명 후보: MKTCAP, FND_NETASST_TOTAMT, netAsst, etc.
+  filtered = filtered.map(r => {
+    const nm = r.ISU_NM ?? r.isuNm ?? "-";
+    // AUM 후보 필드 순서대로 시도
+    const aumRaw =
+      r.FND_NETASST_TOTAMT ?? r.MKTCAP ?? r.mktcap ??
+      r.netAsst ?? r.NET_ASST ?? r.NETASST ?? null;
+    const aum = aumRaw ? Math.round(parseFloat(String(aumRaw).replace(/,/g,"")) / 100000000) : null;
+    return { name: nm, company: r.ISU_ABBRV ?? r.isuAbbrv ?? "-", aum, raw: r };
+  });
+
+  // AUM 있는 것 먼저, 내림차순 정렬
+  filtered.sort((a, b) => {
+    if (a.aum === null && b.aum === null) return 0;
+    if (a.aum === null) return 1;
+    if (b.aum === null) return -1;
+    return b.aum - a.aum;
+  });
+
+  const top15 = filtered.slice(0, 15);
+  const maxAum = Math.max(...top15.map(r => r.aum ?? 0), 1);
+  const totalAum = top15.reduce((s, r) => s + (r.aum ?? 0), 0);
+
+  const tbody = document.getElementById("tableBody");
+
+  if (!top15.length) {
+    tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;padding:30px;color:#AAB">
+      해당 카테고리 ETF를 찾지 못했습니다.<br/>
+      <small style="font-size:10px">AUM 필드명: ${Object.keys(rows[0]??{}).join(", ")}</small>
+    </td></tr>`;
+
+    // 디버그: 전체 필드 표시
+    if (rows.length) {
+      const debugDiv = document.createElement("div");
+      debugDiv.style = "padding:10px 16px;font-size:11px;color:#778;background:#FFF8EE;";
+      debugDiv.innerHTML = `<strong>수신된 필드명:</strong> ${Object.keys(rows[0]).join(" / ")}<br/>
+      <strong>첫 번째 행:</strong> ${JSON.stringify(rows[0])}`;
+      document.querySelector(".table-wrap").after(debugDiv);
+    }
+    return;
+  }
+
+  tbody.innerHTML = top15.map((r, i) => {
+    const badgeClass = i === 0 ? "rank-1" : i < 3 ? "rank-2" : "rank-n";
+    const barClass = i === 0 ? "bar-1" : "bar-n";
+    const barW = r.aum ? Math.max(4, (r.aum / maxAum) * 100) : 0;
+    const pct = totalAum > 0 && r.aum ? ((r.aum / totalAum) * 100).toFixed(1) : "-";
+    return `
+    <tr>
+      <td style="text-align:center">
+        ${r.aum !== null ? `<span class="rank-badge ${badgeClass}">${i+1}</span>` : `<span style="color:#CCD">-</span>`}
+      </td>
+      <td style="color:#1A1A2E;font-weight:${i<3?'600':'400'}">${r.name}</td>
+      <td style="text-align:center;color:#556688;font-size:11px">${r.company}</td>
+      <td style="text-align:right">${fmtAum(r.aum)}</td>
+      <td>
+        ${r.aum ? `<div class="bar-wrap">
+          <div class="bar ${barClass}" style="width:${barW}px;max-width:100px"></div>
+          <span class="bar-pct">${pct}%</span>
+        </div>` : '<span style="color:#CCD;font-size:10px">미확인</span>'}
+      </td>
+    </tr>`;
+  }).join("");
+
+  // 요약
+  document.getElementById("summaryBox").style.display = "inline-flex";
+  document.getElementById("sumCount").textContent = `${top15.length}개`;
+  document.getElementById("sumTop").textContent = top15[0]?.name ?? "-";
+}
+</script>
+</body>
+</html>
