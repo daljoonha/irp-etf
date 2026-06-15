@@ -1,4 +1,4 @@
-const http = require("http");
+const https = require("https");
 
 module.exports = async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
@@ -20,12 +20,12 @@ module.exports = async function handler(req, res) {
 
   try {
     const data = await new Promise((resolve, reject) => {
-      const req2 = http.request(options, (r) => {
+      const req2 = https.request(options, (r) => {
         let body = "";
         r.on("data", chunk => body += chunk);
         r.on("end", () => {
           try { resolve(JSON.parse(body)); }
-          catch (e) { reject(new Error("JSON 파싱 실패: " + body.slice(0, 200))); }
+          catch (e) { reject(new Error("JSON 파싱 실패: " + body.slice(0, 300))); }
         });
       });
       req2.on("error", reject);
