@@ -27,14 +27,13 @@
   .notice {
     background: #EEF5FF; border-bottom: 1px solid #C8D8EE;
     padding: 7px 16px; font-size: 11px; color: #5580B0;
-    display: flex; justify-content: space-between; align-items: center;
   }
   .notice.mixed { background: #FFF8EE; border-bottom-color: #F0D8B0; color: #8A6020; }
 
   .controls {
     padding: 10px 16px; background: #fff;
     border-bottom: 1px solid #C8D8EE;
-    display: flex; align-items: center; gap: 10px;
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
   }
   .btn-refresh {
     background: #0066CC; color: #fff; border: none;
@@ -57,7 +56,7 @@
   }
 
   .table-wrap { padding: 10px 14px 6px; overflow-x: auto; }
-  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; min-width: 560px; }
   thead tr { background: #F0F4FA; border-bottom: 2px solid #0066CC; }
   th { padding: 9px 6px; color: #003580; font-weight: 700; white-space: nowrap; }
   tbody tr:nth-child(odd) { background: #fff; }
@@ -109,7 +108,7 @@
     </div>
     <div class="summary-item">
       <div class="summary-label">1위</div>
-      <div class="summary-val" id="sumTop" style="font-size:11px; max-width:160px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap">-</div>
+      <div class="summary-val" id="sumTop" style="font-size:11px;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">-</div>
     </div>
   </div>
 </div>
@@ -122,7 +121,7 @@
       <tr>
         <th style="width:36px;text-align:center">순위</th>
         <th style="text-align:left">ETF명</th>
-        <th style="width:100px;text-align:center">운용사</th>
+        <th style="width:110px;text-align:center">운용사</th>
         <th style="width:95px;text-align:right">AUM</th>
         <th style="width:130px;text-align:left">비율</th>
       </tr>
@@ -141,29 +140,76 @@
 </div>
 
 <script>
-// ── 종목 분류 정의 ──────────────────────────────────────────
-const MIXED_KEYWORDS = [
-  "채권혼합", "혼합50", "혼합44", "TDF", "글로벌자산배분"
-];
-const BOND_KEYWORDS = [
-  "국고채", "통안채", "단기채권", "중기채권", "우량채권",
-  "국채", "회사채", "크레딧", "단기통안"
-];
-// 주식형·해외주식형 제외 키워드
-const EXCLUDE_KEYWORDS = [
-  "레버리지", "인버스", "선물", "원유", "금", "달러", "엔", "유로",
-  "나스닥", "S&P", "미국", "중국", "일본", "베트남", "인도",
-  "코스닥", "코스피200롱", "바이오", "헬스케어", "게임",
-  "2차전지", "반도체", "AI", "로봇", "방산"
-];
+// ── 브랜드 → 운용사 매핑 ──────────────────────────────────
+const BRAND_MAP = {
+  "KODEX":     "삼성자산운용",
+  "TIGER":     "미래에셋자산운용",
+  "RISE":      "KB자산운용",
+  "KBSTAR":    "KB자산운용",
+  "ACE":       "한국투자신탁운용",
+  "SOL":       "신한자산운용",
+  "PLUS":      "한화자산운용",
+  "ARIRANG":   "한화자산운용",
+  "HANARO":    "NH-아문디자산운용",
+  "KIWOOM":    "키움투자자산운용",
+  "KOSEF":     "키움투자자산운용",
+  "WON":       "우리자산운용",
+  "ITF":       "IBK자산운용",
+  "FOCUS":     "교보악사자산운용",
+  "TIMEFOLIO": "타임폴리오자산운용",
+  "MAIAM":     "마이에셋자산운용",
+  "TREX":      "유리자산운용"
+};
 
+function getCompany(name) {
+  for (const [brand, company] of Object.entries(BRAND_MAP)) {
+    if (name.toUpperCase().startsWith(brand)) return company;
+  }
+  return "-";
+}
+
+// ── 채권혼합형 / 채권형 분류 키워드 ───────────────────────
+const MIXED_KEYWORDS = ["채권혼합", "혼합50", "혼합44", "TDF", "글로벌자산배분"];
+const BOND_KEYWORDS  = ["국고채", "통안채", "단기채권", "중기채권", "우량채권",
+                        "국채", "회사채", "크레딧", "단기통안", "초단기채권"];
+const EXCLUDE_MIXED  = ["레버리지","인버스","선물","원유","달러","엔","유로"];
+
+function isMixed(name) {
+  if (EXCLUDE_MIXED.some(k => name.includes(k))) return false;
+  return MIXED_KEYWORDS.some(k => name.includes(k));
+}
+function isBond(name) {
+  if (MIXED_KEYWORDS.some(k => name.includes(k))) return false; // 혼합형 제외
+  return BOND_KEYWORDS.some(k => name.includes(k));
+}
+
+// ── 유틸 ──────────────────────────────────────────────────
 let currentTab = "mixed";
-let allData = [];
+let allData    = [];
 
+function prevBizDay() {
+  const d = new Date();
+  do { d.setDate(d.getDate() - 1); } while ([0, 6].includes(d.getDay()));
+  return d.toISOString().slice(0, 10).replace(/-/g, "");
+}
+
+function fmtAum(v) {
+  if (!v) return "—";
+  if (v >= 10000)
+    return `<span style="color:#E8521A;font-weight:700">${(v/10000).toFixed(1)}</span><span style="font-size:10px;color:#889">조</span>`;
+  return `${v.toLocaleString()}<span style="font-size:10px;color:#889">억</span>`;
+}
+
+function fmtDate(s) {
+  if (!s || s.length !== 8) return s;
+  return `${s.slice(0,4)}.${s.slice(4,6)}.${s.slice(6,8)}`;
+}
+
+// ── 탭 전환 ───────────────────────────────────────────────
 function switchTab(tab) {
   currentTab = tab;
   document.querySelectorAll(".tab").forEach((el, i) => {
-    el.classList.toggle("active", (i === 0 && tab === "mixed") || (i === 1 && tab === "bond"));
+    el.classList.toggle("active", (i===0 && tab==="mixed") || (i===1 && tab==="bond"));
   });
   const notice = document.getElementById("noticeBar");
   if (tab === "mixed") {
@@ -176,36 +222,9 @@ function switchTab(tab) {
   if (allData.length) renderTable(allData);
 }
 
-function isMixed(name) {
-  return MIXED_KEYWORDS.some(k => name.includes(k));
-}
-function isBond(name) {
-  if (EXCLUDE_KEYWORDS.some(k => name.includes(k))) return false;
-  return BOND_KEYWORDS.some(k => name.includes(k));
-}
-function isExcluded(name) {
-  return EXCLUDE_KEYWORDS.some(k => name.includes(k));
-}
-
-function prevBizDay() {
-  const d = new Date();
-  do { d.setDate(d.getDate() - 1); } while ([0, 6].includes(d.getDay()));
-  return d.toISOString().slice(0, 10).replace(/-/g, "");
-}
-
-function fmtAum(v) {
-  if (!v) return "—";
-  if (v >= 10000) return `<span style="color:#E8521A;font-weight:700">${(v/10000).toFixed(1)}</span><span style="font-size:10px;color:#889">조</span>`;
-  return `${v.toLocaleString()}<span style="font-size:10px;color:#889">억</span>`;
-}
-
-function fmtDate(s) {
-  if (!s || s.length !== 8) return s;
-  return `${s.slice(0,4)}.${s.slice(4,6)}.${s.slice(6,8)}`;
-}
-
+// ── 데이터 조회 ───────────────────────────────────────────
 async function loadData() {
-  const btn = document.getElementById("btnRefresh");
+  const btn    = document.getElementById("btnRefresh");
   const errBar = document.getElementById("errorBar");
   btn.disabled = true;
   btn.textContent = "⏳ 조회 중...";
@@ -217,13 +236,13 @@ async function loadData() {
     const res = await fetch(`/api/krx?basDd=${basDd}`);
     if (!res.ok) throw new Error(`서버 오류 ${res.status}`);
     const json = await res.json();
+    if (json.error) throw new Error(json.error);
 
     const rows = json?.OutBlock_1 ?? json?.output ?? json?.result ?? [];
-    if (!rows.length) throw new Error("데이터 없음 — 장 개장일인지 확인해주세요");
+    if (!rows.length) throw new Error("데이터 없음 — 장 개장일을 확인해주세요");
 
     allData = rows;
 
-    // 기준일 표시
     const dateStr = rows[0]?.BAS_DD ?? basDd;
     document.getElementById("baseDate").textContent = `기준일: ${fmtDate(dateStr)} (전 영업일)`;
     document.getElementById("lastUpdated").textContent = `최종 조회: ${new Date().toLocaleString("ko-KR")}`;
@@ -232,32 +251,32 @@ async function loadData() {
 
   } catch(e) {
     errBar.style.display = "block";
-    errBar.textContent = "⚠️ " + e.message;
+    errBar.textContent   = "⚠️ " + e.message;
   } finally {
-    btn.disabled = false;
+    btn.disabled    = false;
     btn.textContent = "🔄 최신 데이터 조회";
   }
 }
 
+// ── 테이블 렌더링 ─────────────────────────────────────────
 function renderTable(rows) {
-  // 탭에 맞게 필터
   let filtered = rows.filter(r => {
-    const nm = r.ISU_NM ?? r.isuNm ?? "";
+    const nm = r.ISU_NM ?? "";
     return currentTab === "mixed" ? isMixed(nm) : isBond(nm);
   });
 
-  // AUM 파싱 — 필드명 후보: MKTCAP, FND_NETASST_TOTAMT, netAsst, etc.
   filtered = filtered.map(r => {
-    const nm = r.ISU_NM ?? r.isuNm ?? "-";
-    // AUM 후보 필드 순서대로 시도
+    const nm  = r.ISU_NM ?? "-";
     const aumRaw =
       r.FND_NETASST_TOTAMT ?? r.MKTCAP ?? r.mktcap ??
       r.netAsst ?? r.NET_ASST ?? r.NETASST ?? null;
-    const aum = aumRaw ? Math.round(parseFloat(String(aumRaw).replace(/,/g,"")) / 100000000) : null;
-    return { name: nm, company: r.ISU_ABBRV ?? r.isuAbbrv ?? "-", aum, raw: r };
+    const aum = aumRaw
+      ? Math.round(parseFloat(String(aumRaw).replace(/,/g,"")) / 100000000)
+      : null;
+    return { name: nm, company: getCompany(nm), aum };
   });
 
-  // AUM 있는 것 먼저, 내림차순 정렬
+  // AUM 내림차순, null은 뒤로
   filtered.sort((a, b) => {
     if (a.aum === null && b.aum === null) return 0;
     if (a.aum === null) return 1;
@@ -265,55 +284,48 @@ function renderTable(rows) {
     return b.aum - a.aum;
   });
 
-  const top15 = filtered.slice(0, 15);
-  const maxAum = Math.max(...top15.map(r => r.aum ?? 0), 1);
+  const top15    = filtered.slice(0, 15);
+  const maxAum   = Math.max(...top15.map(r => r.aum ?? 0), 1);
   const totalAum = top15.reduce((s, r) => s + (r.aum ?? 0), 0);
 
   const tbody = document.getElementById("tableBody");
 
   if (!top15.length) {
     tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;padding:30px;color:#AAB">
-      해당 카테고리 ETF를 찾지 못했습니다.<br/>
-      <small style="font-size:10px">AUM 필드명: ${Object.keys(rows[0]??{}).join(", ")}</small>
+      해당 카테고리 ETF를 찾지 못했습니다.
     </td></tr>`;
-
-    // 디버그: 전체 필드 표시
-    if (rows.length) {
-      const debugDiv = document.createElement("div");
-      debugDiv.style = "padding:10px 16px;font-size:11px;color:#778;background:#FFF8EE;";
-      debugDiv.innerHTML = `<strong>수신된 필드명:</strong> ${Object.keys(rows[0]).join(" / ")}<br/>
-      <strong>첫 번째 행:</strong> ${JSON.stringify(rows[0])}`;
-      document.querySelector(".table-wrap").after(debugDiv);
-    }
     return;
   }
 
   tbody.innerHTML = top15.map((r, i) => {
-    const badgeClass = i === 0 ? "rank-1" : i < 3 ? "rank-2" : "rank-n";
-    const barClass = i === 0 ? "bar-1" : "bar-n";
-    const barW = r.aum ? Math.max(4, (r.aum / maxAum) * 100) : 0;
-    const pct = totalAum > 0 && r.aum ? ((r.aum / totalAum) * 100).toFixed(1) : "-";
+    const badgeClass = i===0 ? "rank-1" : i<3 ? "rank-2" : "rank-n";
+    const barClass   = i===0 ? "bar-1"  : "bar-n";
+    const barW       = r.aum ? Math.max(4, (r.aum / maxAum) * 100) : 0;
+    const pct        = totalAum > 0 && r.aum ? ((r.aum / totalAum)*100).toFixed(1) : "-";
     return `
     <tr>
       <td style="text-align:center">
-        ${r.aum !== null ? `<span class="rank-badge ${badgeClass}">${i+1}</span>` : `<span style="color:#CCD">-</span>`}
+        ${r.aum !== null
+          ? `<span class="rank-badge ${badgeClass}">${i+1}</span>`
+          : `<span style="color:#CCD">-</span>`}
       </td>
       <td style="color:#1A1A2E;font-weight:${i<3?'600':'400'}">${r.name}</td>
       <td style="text-align:center;color:#556688;font-size:11px">${r.company}</td>
       <td style="text-align:right">${fmtAum(r.aum)}</td>
       <td>
-        ${r.aum ? `<div class="bar-wrap">
-          <div class="bar ${barClass}" style="width:${barW}px;max-width:100px"></div>
-          <span class="bar-pct">${pct}%</span>
-        </div>` : '<span style="color:#CCD;font-size:10px">미확인</span>'}
+        ${r.aum
+          ? `<div class="bar-wrap">
+               <div class="bar ${barClass}" style="width:${barW}px;max-width:100px"></div>
+               <span class="bar-pct">${pct}%</span>
+             </div>`
+          : '<span style="color:#CCD;font-size:10px">미확인</span>'}
       </td>
     </tr>`;
   }).join("");
 
-  // 요약
   document.getElementById("summaryBox").style.display = "inline-flex";
-  document.getElementById("sumCount").textContent = `${top15.length}개`;
-  document.getElementById("sumTop").textContent = top15[0]?.name ?? "-";
+  document.getElementById("sumCount").textContent     = `${top15.length}개`;
+  document.getElementById("sumTop").textContent       = top15[0]?.name ?? "-";
 }
 </script>
 </body>
