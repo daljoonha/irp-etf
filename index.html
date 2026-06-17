@@ -189,12 +189,13 @@ let currentTab = "mixed";
 let allData    = [];
 
 function prevBizDay() {
-  const d = new Date();
-  d.setDate(d.getDate() - 1); // 하루 전으로
+  // 한국 시간(UTC+9) 기준으로 날짜 계산
+  const kst = new Date(new Date().getTime() + 9 * 60 * 60 * 1000);
+  const d = new Date(kst.toISOString().slice(0, 10));
+  d.setDate(d.getDate() - 1);
   while ([0, 6].includes(d.getDay())) {
-    d.setDate(d.getDate() - 1); // 토/일이면 계속 하루씩 앞으로
+    d.setDate(d.getDate() - 1);
   }
-  // 한국 시간 기준 YYYYMMDD
   const yyyy = d.getFullYear();
   const mm   = String(d.getMonth() + 1).padStart(2, "0");
   const dd   = String(d.getDate()).padStart(2, "0");
