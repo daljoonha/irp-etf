@@ -12,7 +12,7 @@ module.exports = async function handler(req, res) {
   if (!API_KEY) return res.status(500).json({ error: "KRX_API_KEY 환경변수 없음" });
 
   const options = {
-    hostname: "data-dbg.krx.co.kr",
+    hostname: "data.krx.co.kr",
     path: `/svc/apis/etp/etf_bydd_trd?basDd=${basDd}`,
     method: "GET",
     headers: { AUTH_KEY: API_KEY }
