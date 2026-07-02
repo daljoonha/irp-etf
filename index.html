@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title> DC/IRP 안전자산 ETF AUM TOP 15</title>
+<title>DC/IRP 안전자산 ETF AUM TOP 15</title>
 <script defer src="/_vercel/insights/script.js"></script>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -137,7 +137,8 @@
 
 <div class="footer">
   * 출처: 한국거래소(KRX) 공식 데이터 / AUM 단위: 억원 (1조 이상은 조 단위 표시)<br/>
-  * 본 자료는 내부 참고용이며 투자권유 목적이 아닙니다.
+  * 본 자료는 내부 참고용이며 투자권유 목적이 아닙니다.<br/>
+  <span id="debugField" style="color:#CCD"></span>
 </div>
 
 <script>
@@ -157,7 +158,8 @@ const BRAND_MAP = {
   "WON":       "우리자산운용",
   "ITF":       "IBK자산운용",
   "FOCUS":     "교보악사자산운용",
-  "TIME": "타임폴리오자산운용",
+  "TIMEFOLIO": "타임폴리오자산운용",
+  "TIME":      "타임폴리오자산운용",
   "MAIAM":     "마이에셋자산운용",
   "TREX":      "유리자산운용"
 };
@@ -170,53 +172,57 @@ function getCompany(name) {
 }
 
 // ── 채권혼합형 / 채권형 분류 키워드 ───────────────────────
-const MIXED_KEYWORDS = ["채권혼합", "혼합50", "혼합44", "TDF", "글로벌자산배분"];
+const MIXED_KEYWORDS = ["채권혼합", "혼합50", "혼합44", "TDF", "글로벌자산배분", "미국채혼합", "국채혼합"];
 const BOND_KEYWORDS  = ["국고채", "통안채", "단기채권", "중기채권", "우량채권",
                         "국채", "회사채", "크레딧", "단기통안", "초단기채권"];
-const EXCLUDE_MIXED  = ["레버리지","인버스","선물","원유","달러","엔","유로"];
 
 function isMixed(name) {
-  if (EXCLUDE_MIXED.some(k => name.includes(k))) return false;
   return MIXED_KEYWORDS.some(k => name.includes(k));
 }
 function isBond(name) {
-  if (MIXED_KEYWORDS.some(k => name.includes(k))) return false; // 혼합형 제외
+  if (MIXED_KEYWORDS.some(k => name.includes(k))) return false;
   return BOND_KEYWORDS.some(k => name.includes(k));
 }
 
-// ── 유틸 ──────────────────────────────────────────────────
+// ── AUM 필드 추출 (어떤 필드가 잡혔는지 기록) ─────────────
+const AUM_FIELD_CANDIDATES = [
+  "FND_NETASST_TOTAMT", "NETASST_TOTAMT", "NET_ASST", "NETASST", "MKTCAP"
+];
+let detectedAumField = null;
+
+function extractAum(row) {
+  for (const f of AUM_FIELD_CANDIDATES) {
+    if (row[f] !== undefined && row[f] !== null && row[f] !== "") {
+      if (!detectedAumField) detectedAumField = f;
+      const v = parseFloat(String(row[f]).replace(/,/g, ""));
+      return isNaN(v) ? null : Math.round(v / 100000000);
+    }
+  }
+  return null;
+}
+
+// ── 날짜 유틸 ─────────────────────────────────────────────
 let currentTab = "mixed";
 let allData    = [];
 
-function prevBizDay() {
+function kstToday() {
+  // 한국 시간(UTC+9) 기준 오늘 날짜 객체
   const kst = new Date(new Date().getTime() + 9 * 60 * 60 * 1000);
-  const hour = kst.getUTCHours();
+  return new Date(kst.toISOString().slice(0, 10));
+}
 
-  // KRX 데이터는 장 마감 후 오후 7시경 업로드 → 19시 이전이면 2영업일 전 조회
-  const daysBack = hour < 19 ? 2 : 1;
-
-  const d = new Date(kst.toISOString().slice(0, 10));
-  let count = 0;
-  while (count < daysBack) {
-    d.setDate(d.getDate() - 1);
-    if (![0, 6].includes(d.getDay())) count++;
-  }
+function toYYYYMMDD(d) {
   const yyyy = d.getFullYear();
   const mm   = String(d.getMonth() + 1).padStart(2, "0");
   const dd   = String(d.getDate()).padStart(2, "0");
   return `${yyyy}${mm}${dd}`;
 }
 
-function fmtAum(v) {
-  if (!v) return "—";
-  if (v >= 10000)
-    return `<span style="color:#E8521A;font-weight:700">${(v/10000).toFixed(1)}</span><span style="font-size:10px;color:#889">조</span>`;
-  return `${v.toLocaleString()}<span style="font-size:10px;color:#889">억</span>`;
-}
-
-function fmtDate(s) {
-  if (!s || s.length !== 8) return s;
-  return `${s.slice(0,4)}.${s.slice(4,6)}.${s.slice(6,8)}`;
+function prevWeekday(d) {
+  // 주어진 날짜에서 하루 전 평일로 이동한 새 Date 반환
+  const nd = new Date(d);
+  do { nd.setDate(nd.getDate() - 1); } while ([0, 6].includes(nd.getDay()));
+  return nd;
 }
 
 // ── 탭 전환 ───────────────────────────────────────────────
@@ -236,32 +242,49 @@ function switchTab(tab) {
   if (allData.length) renderTable(allData);
 }
 
-// ── 데이터 조회 ───────────────────────────────────────────
+// ── 데이터 조회 (빈 데이터 시 이전 영업일 자동 재시도) ────
 async function loadData() {
   const btn    = document.getElementById("btnRefresh");
   const errBar = document.getElementById("errorBar");
   btn.disabled = true;
-  btn.textContent = "⏳ 조회 중...";
   errBar.style.display = "none";
 
-  const basDd = prevBizDay();
+  const MAX_RETRY = 5;
+  let d = prevWeekday(kstToday()); // 전 영업일부터 시작
+  let success = false;
 
   try {
-    const res = await fetch(`/api/krx?basDd=${basDd}`);
-    if (!res.ok) throw new Error(`서버 오류 ${res.status}`);
-    const json = await res.json();
-    if (json.error) throw new Error(json.error);
+    for (let i = 0; i < MAX_RETRY; i++) {
+      const basDd = toYYYYMMDD(d);
+      btn.textContent = `⏳ ${basDd} 조회 중...`;
 
-    const rows = json?.OutBlock_1 ?? json?.output ?? json?.result ?? [];
-    if (!rows.length) throw new Error("데이터 없음 — 장 개장일을 확인해주세요");
+      const res = await fetch(`/api/krx?basDd=${basDd}`);
+      if (!res.ok) throw new Error(`서버 오류 ${res.status}`);
+      const json = await res.json();
+      if (json.error) throw new Error(json.error);
 
-    allData = rows;
+      const rows = json?.OutBlock_1 ?? [];
 
-    const dateStr = rows[0]?.BAS_DD ?? basDd;
-    document.getElementById("baseDate").textContent = `기준일: ${fmtDate(dateStr)} (전 영업일)`;
-    document.getElementById("lastUpdated").textContent = `최종 조회: ${new Date().toLocaleString("ko-KR")}`;
+      if (rows.length > 0) {
+        // 데이터 있음 → 렌더링
+        allData = rows;
+        const dateStr = rows[0]?.BAS_DD ?? basDd;
+        document.getElementById("baseDate").textContent =
+          `기준일: ${dateStr.slice(0,4)}.${dateStr.slice(4,6)}.${dateStr.slice(6,8)} (최근 영업일)`;
+        document.getElementById("lastUpdated").textContent =
+          `최종 조회: ${new Date().toLocaleString("ko-KR")}`;
+        renderTable(rows);
+        success = true;
+        break;
+      }
 
-    renderTable(rows);
+      // 빈 데이터 → 하루 더 이전 영업일로 재시도 (공휴일/미업로드 대응)
+      d = prevWeekday(d);
+    }
+
+    if (!success) {
+      throw new Error(`최근 ${MAX_RETRY}영업일 데이터가 모두 비어있습니다. KRX 서버 상태를 확인해주세요.`);
+    }
 
   } catch(e) {
     errBar.style.display = "block";
@@ -272,6 +295,14 @@ async function loadData() {
   }
 }
 
+// ── AUM 포맷 ──────────────────────────────────────────────
+function fmtAum(v) {
+  if (!v) return "—";
+  if (v >= 10000)
+    return `<span style="color:#E8521A;font-weight:700">${(v/10000).toFixed(1)}</span><span style="font-size:10px;color:#889">조</span>`;
+  return `${v.toLocaleString()}<span style="font-size:10px;color:#889">억</span>`;
+}
+
 // ── 테이블 렌더링 ─────────────────────────────────────────
 function renderTable(rows) {
   let filtered = rows.filter(r => {
@@ -280,17 +311,10 @@ function renderTable(rows) {
   });
 
   filtered = filtered.map(r => {
-    const nm  = r.ISU_NM ?? "-";
-    const aumRaw =
-      r.FND_NETASST_TOTAMT ?? r.MKTCAP ?? r.mktcap ??
-      r.netAsst ?? r.NET_ASST ?? r.NETASST ?? null;
-    const aum = aumRaw
-      ? Math.round(parseFloat(String(aumRaw).replace(/,/g,"")) / 100000000)
-      : null;
-    return { name: nm, company: getCompany(nm), aum };
+    const nm = r.ISU_NM ?? "-";
+    return { name: nm, company: getCompany(nm), aum: extractAum(r) };
   });
 
-  // AUM 내림차순, null은 뒤로
   filtered.sort((a, b) => {
     if (a.aum === null && b.aum === null) return 0;
     if (a.aum === null) return 1;
@@ -340,6 +364,12 @@ function renderTable(rows) {
   document.getElementById("summaryBox").style.display = "inline-flex";
   document.getElementById("sumCount").textContent     = `${top15.length}개`;
   document.getElementById("sumTop").textContent       = top15[0]?.name ?? "-";
+
+  // AUM 필드 디버그 표시 (푸터 하단 작은 글씨)
+  if (detectedAumField) {
+    document.getElementById("debugField").textContent =
+      `데이터 필드: ${detectedAumField}` + (detectedAumField === "MKTCAP" ? " (시가총액 — 순자산과 근사치)" : "");
+  }
 }
 </script>
 </body>
