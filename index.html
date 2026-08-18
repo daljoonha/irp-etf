@@ -4,6 +4,16 @@
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 <title>DC/IRP 안전자산 ETF AUM TOP 15</title>
+
+<!-- PWA 설치 지원 -->
+<link rel="manifest" href="/manifest.json"/>
+<meta name="theme-color" content="#003580"/>
+<link rel="icon" href="/icons/icon-192.png"/>
+<link rel="apple-touch-icon" href="/icons/icon-192.png"/>
+<meta name="apple-mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+<meta name="apple-mobile-web-app-title" content="IRP ETF"/>
+
 <script defer src="/_vercel/insights/script.js"></script>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -42,7 +52,24 @@
     font-size: 12px; font-weight: 700; cursor: pointer;
   }
   .btn-refresh:disabled { background: #7AAAD8; cursor: not-allowed; }
+
+  .btn-install {
+    background: #fff; color: #003580; border: 1.5px solid #0066CC;
+    border-radius: 6px; padding: 6px 14px;
+    font-size: 12px; font-weight: 700; cursor: pointer;
+  }
+  .btn-install:active { background: #EEF5FF; }
+  .ios-hint {
+    display: none; font-size: 10.5px; color: #7A8AA0;
+  }
+
   .last-updated { font-size: 11px; color: #A0A8B8; }
+  .etf-link {
+    color: inherit; text-decoration: none;
+    border-bottom: 1px dotted #0066CC;
+  }
+  .etf-link:hover { color: #0066CC; }
+  .etf-link-mark { font-size: 9px; color: #7AAAD8; margin-left: 2px; }
   .summary-box {
     display: inline-flex; gap: 16px; background: #F0F4FA;
     border-radius: 6px; padding: 5px 14px; margin-left: auto;
@@ -101,6 +128,8 @@
 
 <div class="controls">
   <button class="btn-refresh" id="btnRefresh" onclick="loadData()">🔄 최신 데이터 조회</button>
+  <button class="btn-install" id="btnInstall" style="display:none">📲 앱 설치</button>
+  <span class="ios-hint" id="iosHint">Safari 공유 버튼 → &lsquo;홈 화면에 추가&rsquo;로 설치</span>
   <span class="last-updated" id="lastUpdated"></span>
   <div class="summary-box" id="summaryBox" style="display:none">
     <div class="summary-item">
@@ -137,6 +166,7 @@
 
 <div class="footer">
   * 출처: 한국거래소(KRX) 공식 데이터 / AUM 단위: 억원 (1조 이상은 조 단위 표시)<br/>
+  * ETF명 클릭 시 코스콤 ETF CHECK(etfcheck.co.kr) 종목 상세 페이지로 이동합니다.<br/>
   * 본 자료는 내부 참고용이며 투자권유 목적이 아닙니다.<br/>
   <span id="debugField" style="color:#CCD"></span>
 </div>
@@ -196,6 +226,33 @@ function extractAum(row) {
       if (!detectedAumField) detectedAumField = f;
       const v = parseFloat(String(row[f]).replace(/,/g, ""));
       return isNaN(v) ? null : Math.round(v / 100000000);
+    }
+  }
+  return null;
+}
+
+// ── ETF CHECK 연동용 종목코드 추출 ─────────────────────────
+// 주의: KRX API의 정확한 필드명(6자리 코드 vs 12자리 ISIN)을 실환경에서
+// 직접 검증하지 못해, 두 형식 모두를 방어적으로 처리한다.
+const CODE_FIELD_CANDIDATES = ["ISU_SRT_CD", "ISU_CD", "SHORT_CODE", "ISU_SHRT_CD"];
+let detectedCodeField = null;
+let detectedCodeFormat = null; // "isin" | "raw6"
+
+function extractEtfCode(row) {
+  for (const f of CODE_FIELD_CANDIDATES) {
+    const raw = row[f];
+    if (raw === undefined || raw === null || raw === "") continue;
+    const s = String(raw).trim();
+    // 국내 ISIN 형식: KR7 + 6자리 종목코드 + 3자리 체크 → 6자리만 추출
+    const isinMatch = s.match(/^KR7(\d{6})\d{3}$/i);
+    if (isinMatch) {
+      if (!detectedCodeField) { detectedCodeField = f; detectedCodeFormat = "isin(12자리)"; }
+      return isinMatch[1];
+    }
+    // 이미 6자리 숫자 코드인 경우 그대로 사용
+    if (/^\d{6}$/.test(s)) {
+      if (!detectedCodeField) { detectedCodeField = f; detectedCodeFormat = "6자리 코드"; }
+      return s;
     }
   }
   return null;
@@ -312,7 +369,7 @@ function renderTable(rows) {
 
   filtered = filtered.map(r => {
     const nm = r.ISU_NM ?? "-";
-    return { name: nm, company: getCompany(nm), aum: extractAum(r) };
+    return { name: nm, company: getCompany(nm), aum: extractAum(r), code: extractEtfCode(r) };
   });
 
   filtered.sort((a, b) => {
@@ -347,7 +404,11 @@ function renderTable(rows) {
           ? `<span class="rank-badge ${badgeClass}">${i+1}</span>`
           : `<span style="color:#CCD">-</span>`}
       </td>
-      <td style="color:#1A1A2E;font-weight:${i<3?'600':'400'}">${r.name}</td>
+      <td style="color:#1A1A2E;font-weight:${i<3?'600':'400'}">${
+        r.code
+          ? `<a class="etf-link" href="https://www.etfcheck.co.kr/mobile/etpitem/${r.code}" target="_blank" rel="noopener noreferrer">${r.name}<span class="etf-link-mark">↗</span></a>`
+          : r.name
+      }</td>
       <td style="text-align:center;color:#556688;font-size:11px">${r.company}</td>
       <td style="text-align:right">${fmtAum(r.aum)}</td>
       <td>
@@ -367,10 +428,58 @@ function renderTable(rows) {
 
   // AUM 필드 디버그 표시 (푸터 하단 작은 글씨)
   if (detectedAumField) {
+    const codeInfo = detectedCodeField
+      ? ` / 종목코드 필드: ${detectedCodeField} (${detectedCodeFormat})`
+      : " / 종목코드 필드: 미검출 → ETF명 링크 비활성";
     document.getElementById("debugField").textContent =
-      `데이터 필드: ${detectedAumField}` + (detectedAumField === "MKTCAP" ? " (시가총액 — 순자산과 근사치)" : "");
+      `데이터 필드: ${detectedAumField}` + (detectedAumField === "MKTCAP" ? " (시가총액 — 순자산과 근사치)" : "") + codeInfo;
   }
 }
+
+// ── PWA: 서비스워커 등록 ────────────────────────────────────
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("/sw.js").catch(err => {
+      console.warn("서비스워커 등록 실패:", err);
+    });
+  });
+}
+
+// ── PWA: 설치(Add to Home Screen) 버튼 ─────────────────────
+let deferredInstallPrompt = null;
+const btnInstall = document.getElementById("btnInstall");
+
+window.addEventListener("beforeinstallprompt", (e) => {
+  e.preventDefault();
+  deferredInstallPrompt = e;
+  btnInstall.style.display = "inline-block";
+});
+
+btnInstall.addEventListener("click", async () => {
+  if (!deferredInstallPrompt) return;
+  btnInstall.disabled = true;
+  deferredInstallPrompt.prompt();
+  await deferredInstallPrompt.userChoice;
+  deferredInstallPrompt = null;
+  btnInstall.style.display = "none";
+  btnInstall.disabled = false;
+});
+
+window.addEventListener("appinstalled", () => {
+  btnInstall.style.display = "none";
+  deferredInstallPrompt = null;
+});
+
+// iOS Safari는 beforeinstallprompt를 지원하지 않으므로 수동 안내 문구 표시
+(function showIosHintIfNeeded() {
+  const isIos = /iphone|ipad|ipod/i.test(navigator.userAgent);
+  const isStandalone =
+    window.matchMedia("(display-mode: standalone)").matches ||
+    window.navigator.standalone === true;
+  if (isIos && !isStandalone) {
+    document.getElementById("iosHint").style.display = "inline";
+  }
+})();
 </script>
 </body>
 </html>
